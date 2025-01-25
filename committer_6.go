@@ -2,4 +2,4 @@ package main
 
 import "fmt"
 
-func Run_6() { fmt.Println("Automating Git commits!") }
+func Run_6() { fmt.Println("Hello, world!") }
