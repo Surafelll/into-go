@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"time"
 )
 
 type CommitRequest struct {
@@ -14,19 +15,22 @@ type CommitRequest struct {
 	Author string `json:"author"`
 }
 
-// Generate a random Go function for file content
+// Generate unique file content to ensure Git recognizes changes
 func generateRandomCode(index int) string {
+	timestamp := fmt.Sprintf("// Timestamp: %d\n", time.Now().UnixNano()) // Unique identifier
 	codeSnippets := []string{
 		fmt.Sprintf("func Run_%d() { fmt.Println(\"Hello, world!\") }", index),
 		fmt.Sprintf("func Run_%d() { fmt.Println(\"Random commit bot in action!\") }", index),
 		fmt.Sprintf("func Run_%d() { fmt.Println(\"Automating Git commits!\") }", index),
 	}
-	return codeSnippets[rand.Intn(len(codeSnippets))]
+	randomSnippet := codeSnippets[rand.Intn(len(codeSnippets))]
+
+	return timestamp + randomSnippet
 }
 
-// Set Git commit date
-func setCommitDate(dateInput string) {
-	dateInput = dateInput + " 12:00:00"
+// Set Git commit date uniquely per commit
+func setCommitDate(dateInput string, commitIndex int) {
+	dateInput = fmt.Sprintf("%s %02d:00:00", dateInput, commitIndex) // Different hour per commit
 	os.Setenv("GIT_COMMITTER_DATE", dateInput)
 	os.Setenv("GIT_AUTHOR_DATE", dateInput)
 }
@@ -84,7 +88,7 @@ func commitHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		setCommitDate(req.Date)
+		setCommitDate(req.Date, i)
 		commitAndPush(req.Author, i)
 	}
 
