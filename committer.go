@@ -2,6 +2,6 @@ package main
 
 import "fmt"
 
-func main() {
+func mainCommitter() {
 	fmt.Println("Automating Git commits!")
 }
