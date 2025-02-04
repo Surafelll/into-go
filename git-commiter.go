@@ -1,14 +1,20 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 )
 
-// Generate a random function with a unique name for each file
+type CommitRequest struct {
+	Date   string `json:"date"`
+	Author string `json:"author"`
+}
+
+// Generate a random Go function for file content
 func generateRandomCode(index int) string {
 	codeSnippets := []string{
 		fmt.Sprintf("func Run_%d() { fmt.Println(\"Hello, world!\") }", index),
@@ -18,7 +24,7 @@ func generateRandomCode(index int) string {
 	return codeSnippets[rand.Intn(len(codeSnippets))]
 }
 
-// Set the Git commit date
+// Set Git commit date
 func setCommitDate(dateInput string) {
 	dateInput = dateInput + " 12:00:00"
 	os.Setenv("GIT_COMMITTER_DATE", dateInput)
@@ -30,7 +36,7 @@ func commitAndPush(author string, commitIndex int) {
 	commitMessage := fmt.Sprintf("Automated commit %d by %s", commitIndex, author)
 
 	cmds := [][]string{
-		{"git", "add", "."}, // Add all files
+		{"git", "add", "."},
 		{"git", "commit", "-m", commitMessage},
 	}
 
@@ -42,18 +48,24 @@ func commitAndPush(author string, commitIndex int) {
 	}
 }
 
-func main() {
-	reader := bufio.NewReader(os.Stdin)
+// API endpoint to handle commit requests
+func commitHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST requests allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-	// Get commit date from user
-	fmt.Print("Enter commit date (YYYY-MM-DD): ")
-	dateInput, _ := reader.ReadString('\n')
-	dateInput = dateInput[:len(dateInput)-1] // Remove newline character
+	var req CommitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON data", http.StatusBadRequest)
+		return
+	}
 
-	// Get author name from user
-	fmt.Print("Enter author name: ")
-	author, _ := reader.ReadString('\n')
-	author = author[:len(author)-1] // Remove newline character
+	// Validate input
+	if req.Date == "" || req.Author == "" {
+		http.Error(w, "Missing date or author", http.StatusBadRequest)
+		return
+	}
 
 	for i := 1; i <= 10; i++ {
 		code := generateRandomCode(i)
@@ -61,24 +73,38 @@ func main() {
 
 		file, err := os.Create(fileName)
 		if err != nil {
-			fmt.Printf("Error creating file %s: %v\n", fileName, err)
-			continue
+			http.Error(w, fmt.Sprintf("Error creating file: %v", err), http.StatusInternalServerError)
+			return
 		}
 
 		_, writeErr := file.WriteString(fmt.Sprintf("package main\n\nimport \"fmt\"\n\n%s\n", code))
 		file.Close()
 		if writeErr != nil {
-			fmt.Printf("Error writing to file %s: %v\n", fileName, writeErr)
-			continue
+			http.Error(w, fmt.Sprintf("Error writing to file: %v", writeErr), http.StatusInternalServerError)
+			return
 		}
 
-		setCommitDate(dateInput)
-		commitAndPush(author, i)
+		setCommitDate(req.Date)
+		commitAndPush(req.Author, i)
 	}
 
-	// Push all commits after the loop
+	// Push all commits
 	cmd := exec.Command("git", "push")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Commits pushed successfully"})
+}
+
+func main() {
+	http.HandleFunc("/commit", commitHandler)
+
+	fmt.Println("Server is running on port 8080...")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		fmt.Println("Error starting server:", err)
+	}
 }
