@@ -3,5 +3,5 @@ package main
 import "fmt"
 
 func main() {
-	fmt.Println("Automating Git commits!")
+	fmt.Println("Random commit bot in action!")
 }
