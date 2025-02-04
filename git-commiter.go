@@ -6,17 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	"os/user"
 )
-
-// Get current system username
-func getUsername() string {
-	currentUser, err := user.Current()
-	if err != nil {
-		return "Unknown_Author"
-	}
-	return currentUser.Username
-}
 
 // Generate a random function with a unique name for each file
 func generateRandomCode(index int) string {
@@ -54,11 +44,16 @@ func commitAndPush(author string, commitIndex int) {
 
 func main() {
 	reader := bufio.NewReader(os.Stdin)
+
+	// Get commit date from user
 	fmt.Print("Enter commit date (YYYY-MM-DD): ")
 	dateInput, _ := reader.ReadString('\n')
 	dateInput = dateInput[:len(dateInput)-1] // Remove newline character
 
-	author := getUsername()
+	// Get author name from user
+	fmt.Print("Enter author name: ")
+	author, _ := reader.ReadString('\n')
+	author = author[:len(author)-1] // Remove newline character
 
 	for i := 1; i <= 10; i++ {
 		code := generateRandomCode(i)
