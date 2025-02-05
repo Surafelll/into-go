@@ -21,7 +21,6 @@ func commitAndPush() {
 	cmds := [][]string{
 		{"git", "add", "committer.go"},
 		{"git", "commit", "-m", "Automated commit"},
-		{"git", "push"},
 	}
 	for _, cmdArgs := range cmds {
 		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
@@ -43,11 +42,29 @@ func main() {
 	dateInput, _ := reader.ReadString('\n')
 	dateInput = dateInput[:len(dateInput)-1] // Remove newline character
 
-	code := generateRandomCode()
-	file, _ := os.Create("committer.go")
-	defer file.Close()
-	file.WriteString("package main\n\nimport \"fmt\"\n\nfunc main() {\n\t" + code + "\n}\n")
+	for i := 1; i <= 10; i++ {
+		code := generateRandomCode()
+		file, _ := os.Create("committer.go") // This will overwrite the file on each iteration
+		defer file.Close()
+		file.WriteString("package main\n\nimport \"fmt\"\n\nfunc main() {\n\t" + code + "\n}\n") // Add the generated code without 'main' conflict
 
-	setCommitDate(dateInput)
-	commitAndPush()
+		// Set the commit date and make the commit
+		setCommitDate(dateInput)
+		commitAndPush()
+
+		// Add different commit messages
+		cmd := exec.Command("git", "commit", "--amend", "--no-edit", "-m", fmt.Sprintf("Automated commit %d", i))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+
+		// Update the commit date for each commit
+		dateInput = dateInput // Increment the date if necessary
+	}
+
+	// Finally push all the changes after the loop
+	cmd := exec.Command("git", "push")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
 }
