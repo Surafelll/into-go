@@ -4,85 +4,98 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+	"io/ioutil"
 )
 
+// Struct to parse JSON request
 type CommitRequest struct {
-	Date   string `json:"date"`
-	Author string `json:"author"`
+	RepoURL   string `json:"repo_url"`
+	StartDate string `json:"start_date,omitempty"`
+	EndDate   string `json:"end_date,omitempty"`
+	Date      string `json:"date,omitempty"`
+	Author    string `json:"author"`
 }
 
-// Generate random Go code
-func generateRandomCode(index int) string {
-	timestamp := fmt.Sprintf("// Timestamp: %d\n", time.Now().UnixNano())
-	codeSnippets := []string{
-		fmt.Sprintf("func Run_%d() { fmt.Println(\"Hello, world!\") }", index),
-		fmt.Sprintf("func Run_%d() { fmt.Println(\"Automating Git commits!\") }", index),
-		fmt.Sprintf("func Run_%d() { fmt.Println(\"Random commit bot in action!\") }", index),
+// Struct to hold commit messages
+type CommitMessages struct {
+	Messages []string `json:"messages"`
+}
+
+// Find an available port starting from a given number
+func findAvailablePort(startPort int) int {
+	for port := startPort; port < startPort+10; port++ { // Try 10 ports
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err == nil {
+			listener.Close()
+			return port
+		}
 	}
-	return timestamp + codeSnippets[rand.Intn(len(codeSnippets))]
+	return -1 // No available port found
 }
 
-// Set commit date uniquely per commit
-func setCommitDate(dateInput string, commitIndex int) {
-	dateInput = fmt.Sprintf("%s %02d:00:00", dateInput, commitIndex)
-	os.Setenv("GIT_COMMITTER_DATE", dateInput)
-	os.Setenv("GIT_AUTHOR_DATE", dateInput)
+// Get a random date between a range
+func randomDateInRange(startDate, endDate string) string {
+	start, _ := time.Parse("2006-01-02", startDate)
+	end, _ := time.Parse("2006-01-02", endDate)
+	randomTime := start.Add(time.Duration(rand.Int63n(int64(end.Sub(start)))))
+	return randomTime.Format("2006-01-02")
 }
 
-// Cool animated progress bar
-func showProgressBar(current, total int) {
-	width := 30
-	progress := int(float64(current) / float64(total) * float64(width))
-	bar := "[" + strings.Repeat("█", progress) + strings.Repeat("-", width-progress) + "]"
-	fmt.Printf("\r%s %d/%d commits", bar, current, total)
+// Set environment variables for commit date
+func setCommitDate(date string, commitIndex int) {
+	dateWithHour := fmt.Sprintf("%s %02d:00:00", date, commitIndex%24) // Spread commits across hours
+	os.Setenv("GIT_COMMITTER_DATE", dateWithHour)
+	os.Setenv("GIT_AUTHOR_DATE", dateWithHour)
 }
 
-// Save commit history
-func saveCommitHistory(author, commitMessage, commitFolder string) {
-	historyPath := filepath.Join("history", time.Now().Format("2006-01-02"))
-	if err := os.MkdirAll(historyPath, os.ModePerm); err != nil {
-		fmt.Println("⚠️ Error creating history folder:", err)
-		return
+// Clone or pull the repo
+func cloneRepo(repoURL string) (string, error) {
+	repoName := strings.TrimSuffix(filepath.Base(repoURL), ".git")
+	repoPath := filepath.Join("repos", repoName)
+
+	// If repo exists, pull latest changes
+	if _, err := os.Stat(repoPath); !os.IsNotExist(err) {
+		fmt.Println("🔄 Repo exists. Pulling latest changes...")
+		cmd := exec.Command("git", "-C", repoPath, "pull")
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("failed to pull latest changes: %v", err)
+		}
+		return repoPath, nil
 	}
 
-	filename := filepath.Join(historyPath, fmt.Sprintf("%s.txt", filepath.Base(commitFolder)))
-	file, err := os.Create(filename)
+	// Clone repo if it doesn't exist
+	fmt.Println("📥 Cloning repository...")
+	cmd := exec.Command("git", "clone", repoURL, repoPath)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to clone repo: %v", err)
+	}
+
+	return repoPath, nil
+}
+
+// Load commit messages from JSON file
+func loadCommitMessages() ([]string, error) {
+	file, err := ioutil.ReadFile("messages.json")
 	if err != nil {
-		fmt.Println("⚠️ Error saving commit history:", err)
-		return
+		return nil, fmt.Errorf("failed to read messages.json: %v", err)
 	}
-	defer file.Close()
 
-	file.WriteString(fmt.Sprintf("Author: %s\nTime: %s\nFolder: %s\nMessage: %s\n\n",
-		author, time.Now().Format(time.RFC1123), commitFolder, commitMessage))
+	var commitMessages CommitMessages
+	if err := json.Unmarshal(file, &commitMessages); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal commit messages: %v", err)
+	}
+
+	return commitMessages.Messages, nil
 }
 
-// Commit and push
-func commitAndPush(author, commitFolder string, commitIndex, totalCommits int) {
-	commitMessage := fmt.Sprintf("🚀 Automated commit %d by %s", commitIndex, author)
-
-	cmds := [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", commitMessage},
-	}
-
-	for _, cmdArgs := range cmds {
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.Run()
-	}
-
-	showProgressBar(commitIndex, totalCommits)
-	saveCommitHistory(author, commitMessage, commitFolder)
-	time.Sleep(300 * time.Millisecond)
-}
-
-// API handler
+// Commit handler
 func commitHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST requests allowed", http.StatusMethodNotAllowed)
@@ -95,53 +108,115 @@ func commitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Date == "" || req.Author == "" {
-		http.Error(w, "Missing date or author", http.StatusBadRequest)
+	if req.RepoURL == "" || req.Author == "" {
+		http.Error(w, "Missing repo URL or author", http.StatusBadRequest)
 		return
 	}
 
-	commitFolder := filepath.Join("commits", time.Now().Format("2006-02-05_15-04-05"))
+	// Load commit messages
+	commitMessages, err := loadCommitMessages()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error loading commit messages: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Determine commit dates
+	var commitDates []string
+	if req.Date != "" {
+		commitDates = append(commitDates, req.Date) // Single date
+	} else if req.StartDate != "" && req.EndDate != "" {
+		start, _ := time.Parse("2006-01-02", req.StartDate)
+		end, _ := time.Parse("2006-01-02", req.EndDate)
+		for d := start; !d.After(end); d = d.Add(24 * time.Hour) {
+			commitDates = append(commitDates, d.Format("2006-01-02"))
+		}
+	} else {
+		http.Error(w, "Invalid date format", http.StatusBadRequest)
+		return
+	}
+
+	// Clone repo
+	repoPath, err := cloneRepo(req.RepoURL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to clone repo: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create commit folder
+	commitFolder := filepath.Join(repoPath, "commits", time.Now().Format("2006-01-02_15-04-05"))
 	if err := os.MkdirAll(commitFolder, os.ModePerm); err != nil {
 		http.Error(w, "Failed to create commit folder", http.StatusInternalServerError)
 		return
 	}
 
-	totalCommits := 10
+	// Start commit process
+	totalCommits := len(commitDates) * 10 // 10 commits per day
 	fmt.Println("\n🚀 **Starting Automated Commit Process** 🚀\n")
 
-	for i := 1; i <= totalCommits; i++ {
-		code := generateRandomCode(i)
-		fileName := filepath.Join(commitFolder, fmt.Sprintf("committer_%d.go", i))
+	commitIndex := 1
+	for _, commitDate := range commitDates {
+		for i := 0; i < 10; i++ { // Create 10 commits per day
+			fileName := filepath.Join(commitFolder, fmt.Sprintf("commit_%d.go", commitIndex))
+			file, _ := os.Create(fileName)
+			file.WriteString(fmt.Sprintf("package main\n\n// Commit %d on %s\n", commitIndex, commitDate))
+			file.Close()
 
-		file, _ := os.Create(fileName)
-		file.WriteString(fmt.Sprintf("package main\n\nimport \"fmt\"\n\n%s\n", code))
-		file.Close()
+			// Set commit date
+			setCommitDate(commitDate, commitIndex)
 
-		setCommitDate(req.Date, i)
-		commitAndPush(req.Author, commitFolder, i, totalCommits)
+			// Randomly select a commit message
+			randomMessage := commitMessages[rand.Intn(len(commitMessages))]
+
+			// Git add & commit with random message
+			exec.Command("git", "-C", repoPath, "add", ".").Run()
+			exec.Command("git", "-C", repoPath, "commit", "-m", fmt.Sprintf("%s - Commit %d on %s", randomMessage, commitIndex, commitDate)).Run()
+
+			// Progress bar
+			fmt.Printf("\r[██████████████████████████] %d/%d commits", commitIndex, totalCommits)
+			commitIndex++
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 
-	fmt.Println("\n\n✅ All commits completed! Pushing to remote...\n")
-
-	cmd := exec.Command("git", "push")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.Run()
-
+	// Push commits
+	fmt.Println("\n✅ All commits completed! Pushing to remote...\n")
+	exec.Command("git", "-C", repoPath, "push").Run()
 	fmt.Println("\n🎉 **Commits Successfully Pushed!** 🎉")
-	w.Header().Set("Content-Type", "application/json")
+
+	// Send success response
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success", "folder": commitFolder})
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "repo": req.RepoURL})
+}
+
+// Start server
+func startServer(port int) {
+	addr := fmt.Sprintf(":%d", port)
+	server := &http.Server{Addr: addr, Handler: nil}
+
+	fmt.Printf("\n🌍 Server is running on port %d... 🌍\n", port)
+	fmt.Println("🔗 Send a POST request to http://localhost:" + fmt.Sprintf("%d", port) + "/commit")
+	fmt.Println("💾 Example JSON Payload:")
+	fmt.Println(`{"repo_url": "https://github.com/user/repo.git", "start_date": "2025-02-01", "end_date": "2025-02-10", "author": "Surafel"}`)
+	fmt.Println("💾 Or for a single day:")
+	fmt.Println(`{"repo_url": "https://github.com/user/repo.git", "date": "2025-02-05", "author": "Surafel"}`)
+
+	if err := server.ListenAndServe(); err != nil {
+		fmt.Println("Error starting server:", err)
+	}
 }
 
 func main() {
-	http.HandleFunc("/commit", commitHandler)
+	// Seed the random number generator
+	rand.Seed(time.Now().UnixNano())
 
-	fmt.Println("\n🌍 Server is running on port 8080... 🌍")
-	fmt.Println("🔗 Send a POST request to http://localhost:8080/commit")
-	fmt.Println("💾 Example JSON Payload: {\"date\": \"2025-02-05\", \"author\": \"Surafel\"}\n")
-
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Println("❌ Error starting server:", err)
+	// Find available port
+	port := findAvailablePort(8080)
+	if port == -1 {
+		fmt.Println("Error: No available port found.")
+		return
 	}
+
+	// Start HTTP server
+	http.HandleFunc("/commit", commitHandler)
+	startServer(port)
 }
