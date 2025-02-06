@@ -115,7 +115,7 @@ func main() {
 
 	fmt.Println("\n🌍 Server is running on port 8080... 🌍")
 	fmt.Println("🔗 Send a POST request to http://localhost:8080/commit")
-	fmt.Println("💾 Example JSON Payload: {\"date\": \"2025-02-05\", \"author\": \"Surafel\"}\n")
+	fmt.Println("💾 Example JSON Payload: {\"date\": \"2025-02-05\", \"author\": \"Surafel\"}")
 
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		fmt.Println("❌ Error starting server:", err)
