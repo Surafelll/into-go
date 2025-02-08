@@ -17,17 +17,15 @@ type CommitRequest struct {
 	Author string `json:"author"`
 }
 
-// Generate random Go code for commits
+// Generate random Go code
 func generateRandomCode(index int) string {
-	timestamp := fmt.Sprintf("// Timestamp: %d\n", time.Now().UnixNano()) // Unique identifier
+	timestamp := fmt.Sprintf("// Timestamp: %d\n", time.Now().UnixNano())
 	codeSnippets := []string{
 		fmt.Sprintf("func Run_%d() { fmt.Println(\"Hello, world!\") }", index),
 		fmt.Sprintf("func Run_%d() { fmt.Println(\"Automating Git commits!\") }", index),
 		fmt.Sprintf("func Run_%d() { fmt.Println(\"Random commit bot in action!\") }", index),
 	}
-	randomSnippet := codeSnippets[rand.Intn(len(codeSnippets))]
-
-	return timestamp + randomSnippet
+	return timestamp + codeSnippets[rand.Intn(len(codeSnippets))]
 }
 
 // Set commit date uniquely per commit
@@ -39,21 +37,21 @@ func setCommitDate(dateInput string, commitIndex int) {
 
 // Cool animated progress bar
 func showProgressBar(current, total int) {
-	width := 30 // Progress bar width
+	width := 30
 	progress := int(float64(current) / float64(total) * float64(width))
 	bar := "[" + strings.Repeat("█", progress) + strings.Repeat("-", width-progress) + "]"
 	fmt.Printf("\r%s %d/%d commits", bar, current, total)
 }
 
-// Save commit history to a structured folder
-func saveCommitHistory(author string, commitMessage string) {
-	historyPath := filepath.Join("history", time.Now().Format("2006-01-02")) // history/YYYY-MM-DD
+// Save commit history
+func saveCommitHistory(author, commitMessage, commitFolder string) {
+	historyPath := filepath.Join("history", time.Now().Format("2006-01-02"))
 	if err := os.MkdirAll(historyPath, os.ModePerm); err != nil {
 		fmt.Println("⚠️ Error creating history folder:", err)
 		return
 	}
 
-	filename := filepath.Join(historyPath, fmt.Sprintf("%s.txt", time.Now().Format("15-04-05")))
+	filename := filepath.Join(historyPath, fmt.Sprintf("%s.txt", filepath.Base(commitFolder)))
 	file, err := os.Create(filename)
 	if err != nil {
 		fmt.Println("⚠️ Error saving commit history:", err)
@@ -61,12 +59,12 @@ func saveCommitHistory(author string, commitMessage string) {
 	}
 	defer file.Close()
 
-	// Write commit details
-	file.WriteString(fmt.Sprintf("Author: %s\nTime: %s\nMessage: %s\n\n", author, time.Now().Format(time.RFC1123), commitMessage))
+	file.WriteString(fmt.Sprintf("Author: %s\nTime: %s\nFolder: %s\nMessage: %s\n\n",
+		author, time.Now().Format(time.RFC1123), commitFolder, commitMessage))
 }
 
-// Commit and push changes with clean console output
-func commitAndPush(author string, commitIndex int, totalCommits int) {
+// Commit and push
+func commitAndPush(author, commitFolder string, commitIndex, totalCommits int) {
 	commitMessage := fmt.Sprintf("🚀 Automated commit %d by %s", commitIndex, author)
 
 	cmds := [][]string{
@@ -76,15 +74,15 @@ func commitAndPush(author string, commitIndex int, totalCommits int) {
 
 	for _, cmdArgs := range cmds {
 		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.Run() // Run command silently
+		cmd.Run()
 	}
 
-	showProgressBar(commitIndex, totalCommits) // Update progress bar
-	saveCommitHistory(author, commitMessage)  // Save commit message
-	time.Sleep(300 * time.Millisecond)        // Smooth animation effect
+	showProgressBar(commitIndex, totalCommits)
+	saveCommitHistory(author, commitMessage, commitFolder)
+	time.Sleep(300 * time.Millisecond)
 }
 
-// API endpoint to handle commit requests
+// API handler
 func commitHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST requests allowed", http.StatusMethodNotAllowed)
@@ -97,9 +95,14 @@ func commitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate input
 	if req.Date == "" || req.Author == "" {
 		http.Error(w, "Missing date or author", http.StatusBadRequest)
+		return
+	}
+
+	commitFolder := filepath.Join("commits", time.Now().Format("2006-02-05_15-04-05"))
+	if err := os.MkdirAll(commitFolder, os.ModePerm); err != nil {
+		http.Error(w, "Failed to create commit folder", http.StatusInternalServerError)
 		return
 	}
 
@@ -108,19 +111,18 @@ func commitHandler(w http.ResponseWriter, r *http.Request) {
 
 	for i := 1; i <= totalCommits; i++ {
 		code := generateRandomCode(i)
-		fileName := fmt.Sprintf("committer_%d.go", i)
+		fileName := filepath.Join(commitFolder, fmt.Sprintf("committer_%d.go", i))
 
 		file, _ := os.Create(fileName)
 		file.WriteString(fmt.Sprintf("package main\n\nimport \"fmt\"\n\n%s\n", code))
 		file.Close()
 
 		setCommitDate(req.Date, i)
-		commitAndPush(req.Author, i, totalCommits)
+		commitAndPush(req.Author, commitFolder, i, totalCommits)
 	}
 
 	fmt.Println("\n\n✅ All commits completed! Pushing to remote...\n")
 
-	// Push all commits silently (no extra console noise)
 	cmd := exec.Command("git", "push")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -129,7 +131,7 @@ func commitHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("\n🎉 **Commits Successfully Pushed!** 🎉")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Commits pushed successfully"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "folder": commitFolder})
 }
 
 func main() {
